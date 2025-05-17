@@ -17,6 +17,9 @@ from urllib.parse import urljoin
 import mcp
 from mcp.server import McpServer, McpStdio, ResourceTemplate
 from pydantic import BaseModel, Field
+
+# Import email functionality
+from email_sender import EmailConfig, send_file_content_email
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -40,6 +43,9 @@ SCOPES = [
 # Path to the credentials file
 CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'credentials.json')
 TOKEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'token.json')
+
+# Email configuration (load from config file or environment variables)
+EMAIL_CONFIG = EmailConfig.from_config_file('config.json')
 
 
 # Helper function to make a temporary file
@@ -221,6 +227,19 @@ class AnalyzeDocInput(BaseModel):
 class CreateFolderStructureInput(BaseModel):
     project_name: str = Field(..., description="The name of the main project folder")
     project_type: str = Field(..., description="The type of project (e.g., research, marketing, software development)")
+
+
+class SendFileContentEmailInput(BaseModel):
+    file_path: str = Field(..., description="Path to the file whose contents will be included in the email")
+    to_email: str = Field(..., description="Recipient email address")
+    subject: str = Field(..., description="Email subject")
+    cc_emails: Optional[List[str]] = Field(None, description="Optional list of CC recipient email addresses")
+    smtp_server: Optional[str] = Field(None, description="SMTP server (or use environment variable)")
+    smtp_port: Optional[int] = Field(None, description="SMTP port (or use environment variable)")
+    smtp_user: Optional[str] = Field(None, description="SMTP username (or use environment variable)")
+    smtp_password: Optional[str] = Field(None, description="SMTP password (or use environment variable)")
+    sender_email: Optional[str] = Field(None, description="Sender email address (or use environment variable)")
+    include_dummy_stl: Optional[bool] = Field(True, description="Whether to include a dummy STL attachment")
 
 
 # MCP Server implementation
@@ -1115,6 +1134,63 @@ class GoogleDriveMcpServer:
                     "content": [{
                         "type": "text",
                         "text": f"Error in batch upload: {e}"
+                    }],
+                    "isError": True
+                }
+        
+        # Send file content email
+        @self.server.tool("send-file-email", SendFileContentEmailInput)
+        async def send_file_email(input_data):
+            try:
+                # Create email configuration from input, config file, or environment variables
+                if any([input_data.smtp_server, input_data.smtp_port, input_data.smtp_user, input_data.smtp_password, input_data.sender_email]):
+                    # Use input parameters if provided
+                    email_config = EmailConfig(
+                        smtp_server=input_data.smtp_server,
+                        smtp_port=input_data.smtp_port,
+                        smtp_user=input_data.smtp_user,
+                        smtp_password=input_data.smtp_password,
+                        sender_email=input_data.sender_email
+                    )
+                else:
+                    # Use global config loaded from config file
+                    email_config = EMAIL_CONFIG
+                
+                # Check for required file
+                if not os.path.exists(input_data.file_path):
+                    raise FileNotFoundError(f"File not found: {input_data.file_path}")
+                
+                # Send the email
+                success = send_file_content_email(
+                    email_config,
+                    input_data.to_email,
+                    input_data.subject,
+                    input_data.file_path,
+                    input_data.cc_emails,
+                    input_data.include_dummy_stl
+                )
+                
+                if success:
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Email sent successfully!\n\nTo: {input_data.to_email}\nSubject: {input_data.subject}\nFile: {os.path.basename(input_data.file_path)}\nIncluded dummy STL: {'Yes' if input_data.include_dummy_stl else 'No'}"
+                        }]
+                    }
+                else:
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": "Failed to send email. Check SMTP settings and ensure they are correctly configured in config.json, environment variables, or provided in the request."
+                        }],
+                        "isError": True
+                    }
+            except Exception as e:
+                logger.error(f"Error sending email: {e}")
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"Error sending email: {e}"
                     }],
                     "isError": True
                 }

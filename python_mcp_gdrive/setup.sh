@@ -16,7 +16,7 @@ pip install -r requirements.txt
 
 # Make scripts executable
 echo "Making scripts executable..."
-chmod +x server.py upload_test.py
+chmod +x server.py email_test.py gdrive_test.py
 
 echo "Setup complete. You can now run the server with:"
 echo "./server.py"
