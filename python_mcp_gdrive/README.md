@@ -21,6 +21,12 @@ This is a Python implementation of the Model Context Protocol (MCP) server for G
   - Update existing documents
   - Search for documents
   - Delete documents
+  
+- **Email Features:**
+  - Send emails with file contents
+  - Automatically attach files to emails
+  - Include dummy STL attachments
+  - Support for CC recipients
 
 ## Installation
 
@@ -51,6 +57,41 @@ python server.py
 
 The server runs on stdin/stdout, which is the format expected by the MCP protocol. It authenticates with Google on first run.
 
+### Email Configuration
+
+There are three ways to configure email settings:
+
+1. Using a config file (recommended):
+
+Edit the `config.json` file in the python_mcp_gdrive directory:
+
+```json
+{
+    "email": {
+        "smtp_server": "smtp.example.com",
+        "smtp_port": 587,
+        "smtp_user": "your-email@example.com",
+        "smtp_password": "your-app-password",
+        "sender_email": "your-name@example.com",
+        "use_tls": true
+    }
+}
+```
+
+2. Using environment variables:
+
+```bash
+export SMTP_SERVER=smtp.example.com
+export SMTP_PORT=587
+export SMTP_USER=your-email@example.com
+export SMTP_PASSWORD=your-password
+export SENDER_EMAIL=your-name@example.com
+```
+
+3. Providing settings directly when using the `send-file-email` tool.
+
+The system will first check for settings in the tool parameters, then in the config file, and finally in environment variables.
+
 ### Testing File Upload
 
 To test uploading a file to Google Drive:
@@ -63,6 +104,34 @@ For example:
 
 ```bash
 python upload_test.py ../mcp_test/test3/test3.txt
+```
+
+### Testing Email Sending
+
+There are multiple ways to test the email functionality:
+
+1. Using the simplified test script (uses config.json):
+
+```bash
+python send_test_email.py
+```
+
+2. Using the config-based test script:
+
+```bash
+python email_test_config.py --file <path_to_file> --to recipient@example.com [options]
+```
+
+For example:
+
+```bash
+python email_test_config.py --file ../mcp_test/test4/test4.txt --to recipient@example.com --subject "Test Email"
+```
+
+3. Using the original test script with command-line options:
+
+```bash
+python email_test.py --file <path_to_file> --to recipient@example.com --server smtp.example.com --port 587 --user your-email@example.com --password "your-password" [other options]
 ```
 
 ## Connecting to Claude

@@ -1,6 +1,8 @@
 # Credentials & tokens
 credentials.json
 token.json
+python_mcp_gdrive/config.json
+
 
 # Python virtual environment
 venv/

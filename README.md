@@ -25,6 +25,12 @@ With this server, you can:
   - Search for documents
   - Delete documents
 
+- **Email Features:**
+  - Send emails with file contents
+  - Automatically attach files to emails
+  - Include dummy STL attachments
+  - Support for CC recipients
+
 ## Prerequisites
 
 - Python 3.7 or later
@@ -179,6 +185,9 @@ To add new features to the Python MCP server:
 - `share-drive-item` - Shares a file or folder with a specific user
 - `list-permissions` - Lists all permissions on a file or folder
 
+### Email Tools
+- `send-file-email` - Sends an email with file contents and a dummy STL attachment
+
 ## Available Prompts
 
 - `create-doc-template` - Helps create a new document based on a specified topic and writing style
@@ -209,6 +218,12 @@ Here are some example prompts you can use with Claude once the server is connect
 - "Share my file with ID '1abc123def456' with user@example.com as an editor"
 - "Who has access to my file with ID '1abc123def456'?"
 - "Suggest a folder structure for my new marketing project called 'Q1 Campaign'"
+
+### Email Examples
+- "Send an email with the contents of /path/to/file.txt to recipient@example.com"
+- "Email the report in /path/to/report.txt to the team at team@example.com"
+- "Send the contents of /path/to/data.txt as an email with the subject 'Data Analysis Results'"
+- "Send an email to manager@example.com with the contents of /path/to/status.txt and CC team@example.com"
 
 ## Troubleshooting
 

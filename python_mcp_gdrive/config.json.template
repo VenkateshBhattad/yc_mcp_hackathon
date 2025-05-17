@@ -1,0 +1,10 @@
+{
+    "email": {
+        "smtp_server": "smtp.example.com",
+        "smtp_port": 587,
+        "smtp_user": "your-email@example.com",
+        "smtp_password": "your-app-password",
+        "sender_email": "your-name@example.com",
+        "use_tls": true
+    }
+}

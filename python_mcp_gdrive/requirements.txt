@@ -5,3 +5,4 @@ google-auth-httplib2==0.1.1
 google-api-python-client==2.123.0
 pydantic==2.6.3
 mcp-sdk==1.5.0
+secure-smtplib==0.1.1  # For sending emails
