@@ -3,7 +3,7 @@
 requires freecad-mcp
 https://github.com/neka-nat/freecad-mcp
 
-**Overall Flow in `_execute_full_flow`:**
+**Overall Flow:**
 
 *   The user's query and chat history are received.
 *   **Step 1 (Design Calculation)**. The results are prepared for UI display.
