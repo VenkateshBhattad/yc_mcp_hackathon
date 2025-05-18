@@ -26,6 +26,25 @@ load_dotenv()
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
+# --- Email Sending Integration ---
+# Assuming email_sender.py is in yc_mcp_hackathon/python_mcp_gdrive/
+# and send_file_content_email accepts an attachment_file_path argument.
+try:
+    from yc_mcp_hackathon.python_mcp_gdrive.email_sender import EmailSender, EmailConfig
+    EMAIL_FUNCTION_AVAILABLE = True
+except ImportError:
+    print("Warning: email_sender.py not found or EmailSender/EmailConfig could not be imported. Email functionality will be disabled.")
+    EMAIL_FUNCTION_AVAILABLE = False
+
+# Configuration for email sending
+DEFAULT_EMAIL_CONFIG_PATH = "yc_mcp_hackathon/python_mcp_gdrive/config.json"
+#DEFAULT_EMAIL_TO = "venkatesh.bhattad@gmail.com" # Please change this to your desired recipient
+DEFAULT_EMAIL_TO = "hiro.saxophone@gmail.com" # Please change this to your desired recipient
+
+DEFAULT_EMAIL_SUBJECT = "Design Proposal and Artifacts"
+MODEL_EXPORTS_DIR = "model_exports"
+# --- End Email Sending Integration ---
+
 class LangchainMCPApp:
     def __init__(self):
         self.mcp_client = None
@@ -56,16 +75,6 @@ class LangchainMCPApp:
         self.mcp_client = await self.exit_stack.enter_async_context(
             MultiServerMCPClient(
                 {
-                    # "stock": {
-                    #     "command": "python",
-                    #     "args": ["yahoofinance_server.py"],
-                    #     "transport": "stdio",
-                    # },
-                    # "chart": {
-                    #     "command": "python",
-                    #     "args": ["repl_server.py"],
-                    #     "transport": "stdio",
-                    # },
                     # "playwright": {
                     #     "command": "npx",
                     #     "args": ["@playwright/mcp@latest"],
@@ -178,6 +187,7 @@ If the export tool returns a JSON with 'file_content_b64', ensure that JSON stri
             else: # Fallback if response structure is unexpected
                 agent_response_content = str(agent_response_dict)
 
+            print(agent_response_content)
 
             image_data_b64 = None
             model_file_path = None
@@ -204,6 +214,10 @@ If the export tool returns a JSON with 'file_content_b64', ensure that JSON stri
                         screenshot_file_path = os.path.join(exports_dir, screenshot_filename)
                         # Remove the "data:image/png;base64," prefix before decoding
                         img_data_to_decode = image_data_b64.split(',')[1]
+                        # Base64 文字列の長さが 4 の倍数でない場合は '=' を補完
+                        missing_padding = len(img_data_to_decode) % 4
+                        if missing_padding:
+                            img_data_to_decode += '=' * (4 - missing_padding)
                         with open(screenshot_file_path, "wb") as f:
                             f.write(base64.b64decode(img_data_to_decode))
                         print(f"Screenshot saved to: {screenshot_file_path}")
@@ -213,9 +227,9 @@ If the export tool returns a JSON with 'file_content_b64', ensure that JSON stri
                         # For now, we just print and continue, screenshot_file_path will remain None or its previous value
 
             # Extract exported file data
-            # The export tool returns a JSON string as TextContent.
-            # The agent's response should contain this JSON string.
-            export_data_match = re.search(r'\{\s*"file_name":\s*".*?",\s*"file_format":\s*".*?",\s*"file_content_b64":\s*".*?",\s*"message":\s*".*?"\s*\}', agent_response_content, re.DOTALL)
+            # Relax the pattern so that as long as the JSON contains the key "file_content_b64" we treat it as export data.
+            # This prevents missing the export when the agent omits optional keys (e.g., "message").
+            export_data_match = re.search(r'\{[^{}]*"file_content_b64"[^{}]*\}', agent_response_content, re.DOTALL)
 
             if export_data_match:
                 try:
@@ -383,7 +397,11 @@ else:
                                 fallback_filename = f"fallback_direct_ss_{timestamp}.png"
                                 fallback_save_path = os.path.join(exports_dir, fallback_filename)
                                 
-                                img_data_to_decode = fallback_image_data_b64.split(',')[1] # Remove data:image/png;base64, prefix
+                                img_data_to_decode = fallback_image_data_b64.split(',')[1]  # Remove data:image/png;base64, prefix
+                                # Base64 文字列の長さが 4 の倍数でない場合は '=' を補完
+                                missing_padding = len(img_data_to_decode) % 4
+                                if missing_padding:
+                                    img_data_to_decode += '=' * (4 - missing_padding)
                                 
                                 with open(fallback_save_path, "wb") as f:
                                     f.write(base64.b64decode(img_data_to_decode))
@@ -495,10 +513,23 @@ The document should include the following elements:
             )
 
             if modeling_result_data.get("error"):
+                # エラーメッセージをまず追加
                 flow_responses.append({
                     "role": "assistant",
                     "content": f"**Step 2: 3D Modeling & Export Error**\n```\n{modeling_result_data['error']}\n```"
                 })
+
+                # エラー時でも fallback_screenshot_path があれば処理する
+                if modeling_result_data.get("fallback_screenshot_path"):
+                    fallback_screenshot_file_for_gradio = modeling_result_data["fallback_screenshot_path"]
+                    img_html_fallback = f'<img src="file={fallback_screenshot_file_for_gradio}" alt="Fallback screenshot due to error" />'
+                    flow_responses.append({
+                        "role": "assistant",
+                        "content": f"**Step 2: Fallback Screenshot (due to modeling error)**\n{img_html_fallback}"
+                    })
+                    # メインの screenshot 変数が未設定ならここで設定
+                    if not screenshot_file_for_gradio:
+                        screenshot_file_for_gradio = fallback_screenshot_file_for_gradio
             else:
                 if modeling_result_data.get("image_data") and not modeling_result_data.get("screenshot_file_path"):
                     img_html = f'<img src="{modeling_result_data["image_data"]}" alt="generated 3d model" />'
@@ -513,14 +544,7 @@ The document should include the following elements:
                     img_html_from_file = f'<img src="file={screenshot_file_for_gradio}" alt="generated 3d model screenshot" />'
                     flow_responses.append({"role": "assistant", "content": f"**Step 2: Screenshot Saved**\nScreenshot saved as: {os.path.basename(screenshot_file_for_gradio)}."})
 
-                if modeling_result_data.get("fallback_screenshot_path"):
-                    fallback_screenshot_file_for_gradio = modeling_result_data["fallback_screenshot_path"]
-                    img_html_fallback = f'<img src="file={fallback_screenshot_file_for_gradio}" alt="Fallback screenshot due to error" />'
-                    flow_responses.append({"role": "assistant", "content": f"**Step 2: Fallback Screenshot (due to modeling error)**\n{img_html_fallback}"})
-                    if not screenshot_file_for_gradio:
-                        screenshot_file_for_gradio = fallback_screenshot_file_for_gradio
-
-                if not modeling_result_data.get("image_data") and not modeling_result_data.get("model_file_path") and not modeling_result_data.get("screenshot_file_path") and not modeling_result_data.get("fallback_screenshot_path"):
+                if not modeling_result_data.get("image_data") and not modeling_result_data.get("model_file_path") and not modeling_result_data.get("screenshot_file_path"):
                     flow_responses.append({"role": "assistant", "content": "**Step 2: 3D Modeling & Export Result**\nNo specific output or error reported by the modeling step."})
         except RuntimeError as e:
             flow_responses.append({"role": "assistant", "content": f"**Step 2: 3D Modeling & Export Skipped**\nFailed to initialize modeling agent: {e}"})
@@ -546,8 +570,8 @@ The document should include the following elements:
         # which it does by converting to HumanMessage/AIMessage.
 
         # Call _execute_full_flow and get the response
-        flow_chat_responses, proposal_md_content, model_file_path_for_ui, screenshot_file_path_for_ui = loop.run_until_complete(
-            self._execute_full_flow(message, history) # Pass Gradio's history directly
+        flow_chat_responses, proposal_md_content, model_file_path, screenshot_file_path_or_obj = loop.run_until_complete(
+            self._execute_post_calculation(message, history, loop.run_until_complete(self._run_calculation_step(message, history)))
         )
 
         # Create the final Gradio history for UI update
@@ -562,11 +586,13 @@ The document should include the following elements:
         updated_gradio_history.extend(flow_chat_responses)
 
         # Process to save proposal.md as a file
-        md_file_path = "proposal.md"
+        if not os.path.exists(MODEL_EXPORTS_DIR):
+            os.makedirs(MODEL_EXPORTS_DIR)
+        md_file_path = os.path.join(MODEL_EXPORTS_DIR, "proposal.md")
         with open(md_file_path, "w", encoding="utf-8") as f:
             f.write(proposal_md_content)
 
-        return updated_gradio_history, md_file_path, model_file_path_for_ui, screenshot_file_path_for_ui # Added screenshot path
+        return updated_gradio_history, md_file_path, model_file_path, screenshot_file_path_or_obj
 
     async def _execute_full_flow(self, *args, **kwargs):
         """Deprecated: Use new streaming-based flow with _execute_post_calculation."""
@@ -633,25 +659,89 @@ def gradio_app_interface():
             current_final_history = history_step2 + flow_responses
 
             # proposal.md を保存
-            md_file_path = "proposal.md"
+            if not os.path.exists(MODEL_EXPORTS_DIR):
+                os.makedirs(MODEL_EXPORTS_DIR)
+            md_file_path = os.path.join(MODEL_EXPORTS_DIR, "proposal.md")
             with open(md_file_path, "w", encoding="utf-8") as f:
                 f.write(proposal_md_content)
             current_final_history.append({
                 "role": "assistant",
-                "content": f"Saved proposal file (`{os.path.basename(md_file_path)}`)."
+                "content": f"Saved proposal file (`{os.path.basename(md_file_path)}`) to `{MODEL_EXPORTS_DIR}` folder."
             })
 
             if model_file_path:
                 current_final_history.append({
                     "role": "assistant",
-                    "content": f"Saved 3D model file (`{os.path.basename(model_file_path)}`)."
+                    "content": f"Saved 3D model file (`{os.path.basename(model_file_path)}`) to `{MODEL_EXPORTS_DIR}` folder."
                 })
 
             if screenshot_file_path_or_obj:
                 current_final_history.append({
                     "role": "assistant",
-                    "content": f"Saved screenshot (`{os.path.basename(screenshot_file_path_or_obj)}`)."
+                    "content": f"Saved screenshot (`{os.path.basename(screenshot_file_path_or_obj)}`) to `{MODEL_EXPORTS_DIR}` folder."
                 })
+
+            # --- Send Email ---
+            if EMAIL_FUNCTION_AVAILABLE:
+                email_subject = f"{DEFAULT_EMAIL_SUBJECT} - {os.path.basename(md_file_path)}"
+                print(f"Attempting to send email with proposal '{md_file_path}' ...")
+
+                try:
+                    # Prepare email body from proposal.md content
+                    with open(md_file_path, "r", encoding="utf-8") as f_md:
+                        email_body = f_md.read()
+
+                    # Build attachments list (screenshot only)
+                    attachments = []
+                    if screenshot_file_path_or_obj and os.path.exists(screenshot_file_path_or_obj):
+                        attachments.append({
+                            "file_path": screenshot_file_path_or_obj,
+                            "filename": os.path.basename(screenshot_file_path_or_obj),
+                            "content_type": "image/png",
+                        })
+
+                    # Debug: show prepared attachment filenames
+                    if attachments:
+                        print("Attachments prepared:", [os.path.basename(att["file_path"]) for att in attachments])
+                    else:
+                        print("No attachments prepared (screenshot not found).")
+
+                    # Initialize EmailSender
+                    email_config = EmailConfig.from_config_file(DEFAULT_EMAIL_CONFIG_PATH)
+                    sender = EmailSender(email_config)
+
+                    success = sender.send_email(
+                        DEFAULT_EMAIL_TO,
+                        email_subject,
+                        email_body,
+                        attachments,
+                        cc_emails=None,
+                    )
+
+                    if success:
+                        print(f"Email sent successfully to {DEFAULT_EMAIL_TO} with proposal and attachments: {[os.path.basename(att['file_path']) for att in attachments] if attachments else 'None'}.")
+                        current_final_history.append({
+                            "role": "assistant",
+                            "content": f"Proposal (`{os.path.basename(md_file_path)}`) と スクリーンショット (`{os.path.basename(screenshot_file_path_or_obj)}`) を {DEFAULT_EMAIL_TO} に送信しました。" if attachments else f"Proposal (`{os.path.basename(md_file_path)}`) を {DEFAULT_EMAIL_TO} に送信しました (添付スクリーンショットなし)。"
+                        })
+                    else:
+                        print("Failed to send email. Check configuration and logs.")
+                        current_final_history.append({
+                            "role": "assistant",
+                            "content": "メール送信に失敗しました。`config.json` とログをご確認ください。"
+                        })
+                except Exception as e:
+                    print(f"Error during email sending: {e}")
+                    current_final_history.append({
+                        "role": "assistant",
+                        "content": f"メール送信中にエラーが発生しました: {e}"
+                    })
+            else:
+                current_final_history.append({
+                    "role": "assistant",
+                    "content": "メール送信機能が利用できません (email_sender.py のインポートに失敗)。"
+                })
+            # --- End Send Email ---
 
             # Final yield: 完了後に全てのファイルを返す
             yield current_final_history, "" # Removed proposal and screenshot file output
@@ -664,14 +754,29 @@ def gradio_app_interface():
 
         clear_btn = gr.Button("Clear Chat & Output")
         def clear_all():
+            # Clear proposal.md from model_exports directory
+            proposal_file_in_exports = os.path.join(MODEL_EXPORTS_DIR, "proposal.md")
+            if os.path.exists(proposal_file_in_exports):
+                try:
+                    os.remove(proposal_file_in_exports)
+                    print(f"Removed {proposal_file_in_exports}")
+                except Exception as e:
+                    print(f"Error removing {proposal_file_in_exports}: {e}")
+            
+            # Legacy proposal.md in root (if any)
             if os.path.exists("proposal.md"):
-                os.remove("proposal.md")
+                try:
+                    os.remove("proposal.md")
+                    print("Removed proposal.md from root directory.")
+                except Exception as e:
+                    print(f"Error removing proposal.md from root: {e}")
+
             # Clean up any exported models and screenshots in the 'model_exports' directory
-            exports_dir = "model_exports"
-            if os.path.exists(exports_dir):
-                for f_name in os.listdir(exports_dir):
-                    file_path = os.path.join(exports_dir, f_name)
-                    if f_name.endswith((".step", ".stl", ".iges", ".brep", ".png")): # Added .png for screenshots
+            if os.path.exists(MODEL_EXPORTS_DIR):
+                for f_name in os.listdir(MODEL_EXPORTS_DIR):
+                    file_path = os.path.join(MODEL_EXPORTS_DIR, f_name)
+                    # Keep proposal.md deletion separate above, here focus on other artifacts
+                    if f_name != "proposal.md" and f_name.endswith((".step", ".stl", ".iges", ".brep", ".png")):
                         try:
                             os.remove(file_path)
                             print(f"Removed exported file: {file_path}")
